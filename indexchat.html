@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Web CAD DXF Viewer</title>
+
+<style>
+body{
+    margin:0;
+    overflow:hidden;
+    font-family:Arial;
+    background:#111;
+}
+
+#viewer{width:100vw;height:100vh;cursor:crosshair;}
+
+#ui{
+    position:absolute;
+    top:10px;
+    left:10px;
+    z-index:10;
+    background:rgba(0,0,0,0.6);
+    color:white;
+    padding:10px;
+    width:260px;
+    border-radius:10px;
+    font-size:13px;
+}
+
+button,input{
+    width:100%;
+    margin-top:5px;
+}
+
+.layer{
+    margin-top:4px;
+    display:flex;
+    justify-content:space-between;
+    cursor:pointer;
+}
+
+#gridToggle{
+    margin-top:8px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+<input type="file" id="file" accept=".dxf">
+
+<button onclick="zoomExtents()">Zoom Extents</button>
+<button onclick="toggleTheme()">Theme</button>
+<button onclick="toggleGrid()">Grid</button>
+
+<div id="layers"></div>
+
+<div id="measure">Measure: -</div>
+</div>
+
+<div id="viewer"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+
+let scene,camera,renderer,controls;
+let cad = new THREE.Group();
+let layerMap = {};
+
+let grid;
+let dark=true;
+
+let measurePts=[];
+let raycaster=new THREE.Raycaster();
+let mouse=new THREE.Vector2();
+
+init();
+
+function init(){
+
+scene=new THREE.Scene();
+scene.background=new THREE.Color(0x111111);
+
+camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,1,100000);
+camera.position.set(0,0,1000);
+
+renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+document.getElementById("viewer").appendChild(renderer.domElement);
+
+controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true;
+
+controls.mouseButtons={
+LEFT: THREE.MOUSE.ROTATE,
+MIDDLE: THREE.MOUSE.PAN,
+RIGHT: THREE.MOUSE.DOLLY
+};
+
+scene.add(cad);
+
+createGrid();
+
+window.addEventListener("resize",resize);
+renderer.domElement.addEventListener("click",onMeasure);
+
+animate();
+
+}
+
+function animate(){
+requestAnimationFrame(animate);
+controls.update();
+renderer.render(scene,camera);
+}
+
+function resize(){
+camera.aspect=innerWidth/innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(innerWidth,innerHeight);
+}
+
+/* ---------------- GRID ---------------- */
+
+function createGrid(){
+
+grid=new THREE.GridHelper(5000,50,0x444444,0x222222);
+grid.rotation.x=Math.PI/2;
+scene.add(grid);
+
+}
+
+function toggleGrid(){
+grid.visible=!grid.visible;
+}
+
+/* ---------------- FILE ---------------- */
+
+document.getElementById("file").addEventListener("change",e=>{
+
+let file=e.target.files[0];
+if(!file) return;
+
+let reader=new FileReader();
+
+reader.onload=ev=>{
+
+clear();
+
+let parser=new DxfParser();
+let dxf=parser.parseSync(ev.target.result);
+
+dxf.entities.forEach(ent=>draw(ent));
+
+buildLayers();
+
+zoomExtents();
+
+};
+
+reader.readAsText(file);
+
+});
+
+/* ---------------- DRAW ---------------- */
+
+function getLayer(name){
+
+if(!layerMap[name]){
+let g=new THREE.Group();
+layerMap[name]=g;
+cad.add(g);
+}
+return layerMap[name];
+
+}
+
+function color(layer){
+let h=0;
+for(let i=0;i<layer.length;i++){
+h=layer.charCodeAt(i)+((h<<5)-h);
+}
+return new THREE.Color(h & 0xffffff);
+}
+
+function draw(e){
+
+let layer=getLayer(e.layer||"0");
+
+let mat=new THREE.LineBasicMaterial({
+color:color(e.layer||"0")
+});
+
+if(e.type==="LINE"){
+
+layer.add(new THREE.Line(
+new THREE.BufferGeometry().setFromPoints([
+new THREE.Vector3(e.vertices[0].x,e.vertices[0].y,0),
+new THREE.Vector3(e.vertices[1].x,e.vertices[1].y,0)
+]),
+mat
+));
+
+}
+
+if(e.type==="LWPOLYLINE"){
+
+layer.add(new THREE.Line(
+new THREE.BufferGeometry().setFromPoints(
+e.vertices.map(v=>new THREE.Vector3(v.x,v.y,0))
+),
+mat
+));
+
+}
+
+if(e.type==="CIRCLE"){
+
+let c=new THREE.EllipseCurve(
+e.center.x,e.center.y,
+e.radius,e.radius,
+0,Math.PI*2
+);
+
+let pts=c.getPoints(60);
+
+layer.add(new THREE.Line(
+new THREE.BufferGeometry().setFromPoints(
+pts.map(p=>new THREE.Vector3(p.x,p.y,0))
+),
+mat
+));
+
+}
+
+}
+
+/* ---------------- LAYERS UI ---------------- */
+
+function buildLayers(){
+
+let ui=document.getElementById("layers");
+
+Object.keys(layerMap).forEach(name=>{
+
+let d=document.createElement("div");
+d.className="layer";
+
+let b=document.createElement("div");
+b.innerText=name;
+b.onclick=()=>{
+
+layerMap[name].visible=!layerMap[name].visible;
+b.style.opacity=layerMap[name].visible?1:0.3;
+
+};
+
+d.appendChild(b);
+ui.appendChild(d);
+
+});
+
+}
+
+/* ---------------- ZOOM EXTENTS ---------------- */
+
+function zoomExtents(){
+
+let box=new THREE.Box3().setFromObject(cad);
+
+let size=box.getSize(new THREE.Vector3());
+let center=box.getCenter(new THREE.Vector3());
+
+controls.target.copy(center);
+
+let max=Math.max(size.x,size.y);
+
+let dist=max/Math.tan((camera.fov*Math.PI/180)/2);
+
+camera.position.set(center.x,center.y,dist*1.2);
+
+}
+
+/* ---------------- THEME ---------------- */
+
+function toggleTheme(){
+
+dark=!dark;
+
+scene.background=new THREE.Color(
+dark?0x111111:0x707070
+);
+
+}
+
+/* ---------------- CLEAR ---------------- */
+
+function clear(){
+
+while(cad.children.length){
+cad.remove(cad.children[0]);
+}
+
+layerMap={};
+document.getElementById("layers").innerHTML="";
+
+}
+
+/* ---------------- MEASURE (CAD STYLE) ---------------- */
+
+function onMeasure(e){
+
+mouse.x=(e.clientX/innerWidth)*2-1;
+mouse.y=-(e.clientY/innerHeight)*2+1;
+
+raycaster.setFromCamera(mouse,camera);
+
+let p=raycaster.ray.origin.clone().add(
+raycaster.ray.direction.clone().multiplyScalar(1000)
+);
+
+measurePts.push(p);
+
+if(measurePts.length===2){
+
+let d=measurePts[0].distanceTo(measurePts[1]);
+
+document.getElementById("measure").innerText=
+"Measure: "+d.toFixed(2);
+
+measurePts=[];
+
+}
+
+}
+
+</script>
+
+</body>
+</html>
