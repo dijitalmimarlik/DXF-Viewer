@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<title>DXF Viewer Pro</title>
+<title>DXF Viewer Pro FIX</title>
 
 <style>
 body{
@@ -12,28 +12,24 @@ body{
     font-family:Arial;
 }
 
-#viewer{
-    width:100vw;
-    height:100vh;
-}
+#viewer{width:100vw;height:100vh;}
 
 #ui{
     position:absolute;
     top:15px;
     left:15px;
     z-index:10;
-    background:rgba(0,0,0,0.4);
+    background:rgba(0,0,0,0.5);
     padding:12px;
     border-radius:10px;
     color:white;
     width:260px;
+    font-size:13px;
 }
 
 .layer-item{
     display:flex;
-    justify-content:space-between;
-    margin-top:6px;
-    font-size:13px;
+    margin-top:5px;
 }
 
 button{
@@ -42,32 +38,17 @@ button{
 }
 
 #measure{
-    margin-top:10px;
-    font-size:13px;
-}
-
-#loader{
-    position:absolute;
-    inset:0;
-    display:none;
-    align-items:center;
-    justify-content:center;
-    background:rgba(0,0,0,0.5);
-    color:white;
-    font-size:20px;
-    z-index:99;
+    margin-top:8px;
 }
 </style>
 </head>
 
 <body>
 
-<div id="loader">Yükleniyor...</div>
-
 <div id="ui">
 <input type="file" id="file" accept=".dxf">
 
-<button onclick="setTheme()">Tema Değiştir</button>
+<button onclick="setTheme()">Tema</button>
 <button onclick="zoomExtents()">Zoom Extents</button>
 
 <div id="layers"></div>
@@ -84,15 +65,9 @@ button{
 <script>
 
 let scene,camera,renderer,controls;
-
-let layerMap = {};
 let dxfGroup = new THREE.Group();
-
-let measurePoints = [];
-let raycaster = new THREE.Raycaster();
-let mouse = new THREE.Vector2();
-
-let dark = true;
+let layerMap = {};
+let dark=true;
 
 init();
 
@@ -101,27 +76,25 @@ function init(){
 scene = new THREE.Scene();
 scene.background = new THREE.Color(0x707070);
 
-camera = new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,1,100000);
+camera = new THREE.PerspectiveCamera(60,innerWidth/innerHeight,1,100000);
 camera.position.set(0,0,1000);
 
 renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setSize(innerWidth,innerHeight);
 document.getElementById("viewer").appendChild(renderer.domElement);
 
 controls = new THREE.OrbitControls(camera,renderer.domElement);
 controls.enableDamping = true;
 
-// PAN (orta tuş)
 controls.mouseButtons = {
-    LEFT: THREE.MOUSE.ROTATE,
-    MIDDLE: THREE.MOUSE.PAN,
-    RIGHT: THREE.MOUSE.DOLLY
+LEFT: THREE.MOUSE.ROTATE,
+MIDDLE: THREE.MOUSE.PAN,
+RIGHT: THREE.MOUSE.DOLLY
 };
 
 scene.add(dxfGroup);
 
 window.addEventListener("resize",onResize);
-renderer.domElement.addEventListener("click",onMeasure);
 
 animate();
 
@@ -134,45 +107,44 @@ renderer.render(scene,camera);
 }
 
 function onResize(){
-camera.aspect = window.innerWidth/window.innerHeight;
+camera.aspect = innerWidth/innerHeight;
 camera.updateProjectionMatrix();
-renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setSize(innerWidth,innerHeight);
 }
 
 document.getElementById("file").addEventListener("change",e=>{
 
-let file = e.target.files[0];
+let file=e.target.files[0];
 if(!file) return;
 
-document.getElementById("loader").style.display="flex";
+let reader=new FileReader();
 
-let reader = new FileReader();
-
-reader.onload = ev=>{
+reader.onload=ev=>{
 
 try{
 
-clearScene();
+clear();
 
-let parser = new DxfParser();
-let dxf = parser.parseSync(ev.target.result);
+let parser=new DxfParser();
+let dxf=parser.parseSync(ev.target.result);
 
-// layer oluştur
-createLayers(dxf);
+// 🔥 FIX: layer güvenli okuma
+let layers = extractLayers(dxf);
+
+for(let name of layers){
+getLayer(name);
+}
 
 dxf.entities.forEach(ent=>{
-drawEntity(ent);
+draw(ent);
 });
 
-buildLayerUI();
+buildUI();
 zoomExtents();
 
 }catch(err){
 console.error(err);
 alert(err.message);
-}
-finally{
-document.getElementById("loader").style.display="none";
 }
 
 };
@@ -181,13 +153,34 @@ reader.readAsText(file,"utf-8");
 
 });
 
-function clearScene(){
+function extractLayers(dxf){
+
+// CASE 1
+if(dxf.tables?.layer?.layers &&
+Array.isArray(dxf.tables.layer.layers)){
+
+return dxf.tables.layer.layers.map(l=>l.name);
+}
+
+// CASE 2 (OBJECT)
+if(dxf.tables?.layer?.layers &&
+typeof dxf.tables.layer.layers === "object"){
+
+return Object.keys(dxf.tables.layer.layers);
+}
+
+// CASE 3 (fallback)
+return [...new Set(dxf.entities.map(e=>e.layer || "0"))];
+
+}
+
+function clear(){
 
 while(dxfGroup.children.length){
 dxfGroup.remove(dxfGroup.children[0]);
 }
 
-layerMap = {};
+layerMap={};
 document.getElementById("layers").innerHTML="";
 
 }
@@ -195,46 +188,38 @@ document.getElementById("layers").innerHTML="";
 function getLayer(name){
 
 if(!layerMap[name]){
-let g = new THREE.Group();
-g.visible = true;
-layerMap[name] = g;
+
+let g=new THREE.Group();
+layerMap[name]=g;
 dxfGroup.add(g);
+
 }
 
 return layerMap[name];
-}
-
-function createLayers(dxf){
-
-if(!dxf.tables?.layer?.layers) return;
-
-for(let l of dxf.tables.layer.layers){
-getLayer(l.name);
-}
 
 }
 
-function colorByLayer(layerName){
+function color(layer){
 
-// basit renk hash
-let hash = 0;
-for(let i=0;i<layerName.length;i++){
-hash = layerName.charCodeAt(i)+((hash<<5)-hash);
+let h=0;
+for(let i=0;i<layer.length;i++){
+h=layer.charCodeAt(i)+((h<<5)-h);
 }
-return new THREE.Color(hash & 0xffffff);
+return new THREE.Color(h & 0xffffff);
+
 }
 
-function drawEntity(e){
+function draw(e){
 
-let layer = getLayer(e.layer || "0");
+let layer=getLayer(e.layer||"0");
 
-let mat = new THREE.LineBasicMaterial({
-color: colorByLayer(e.layer || "0")
+let mat=new THREE.LineBasicMaterial({
+color:color(e.layer||"0")
 });
 
-if(e.type === "LINE"){
+if(e.type==="LINE"){
 
-let geo = new THREE.BufferGeometry().setFromPoints([
+let geo=new THREE.BufferGeometry().setFromPoints([
 new THREE.Vector3(e.vertices[0].x,e.vertices[0].y,0),
 new THREE.Vector3(e.vertices[1].x,e.vertices[1].y,0)
 ]);
@@ -242,58 +227,56 @@ new THREE.Vector3(e.vertices[1].x,e.vertices[1].y,0)
 layer.add(new THREE.Line(geo,mat));
 }
 
-if(e.type === "LWPOLYLINE" || e.type==="POLYLINE"){
+if(e.type==="LWPOLYLINE"||e.type==="POLYLINE"){
 
-let pts = e.vertices.map(v=>new THREE.Vector3(v.x,v.y,0));
+let pts=e.vertices.map(v=>new THREE.Vector3(v.x,v.y,0));
 
 if(e.shape) pts.push(pts[0]);
 
-let geo = new THREE.BufferGeometry().setFromPoints(pts);
-
-layer.add(new THREE.Line(geo,mat));
+layer.add(new THREE.Line(
+new THREE.BufferGeometry().setFromPoints(pts),
+mat
+));
 }
 
-if(e.type === "CIRCLE"){
+if(e.type==="CIRCLE"){
 
-let curve = new THREE.EllipseCurve(
+let c=new THREE.EllipseCurve(
 e.center.x,e.center.y,
 e.radius,e.radius,0,Math.PI*2
 );
 
-let pts = curve.getPoints(50);
+let pts=c.getPoints(50);
 
-let geo = new THREE.BufferGeometry().setFromPoints(
+layer.add(new THREE.Line(
+new THREE.BufferGeometry().setFromPoints(
 pts.map(p=>new THREE.Vector3(p.x,p.y,0))
-);
-
-layer.add(new THREE.Line(geo,mat));
+),
+mat
+));
 }
 
 }
 
-function buildLayerUI(){
+function buildUI(){
 
-let ui = document.getElementById("layers");
-ui.innerHTML="";
+let ui=document.getElementById("layers");
 
 Object.keys(layerMap).forEach(name=>{
 
-let div = document.createElement("div");
-div.className="layer-item";
+let d=document.createElement("div");
+d.className="layer-item";
 
-let btn = document.createElement("button");
-btn.innerText = name;
+let b=document.createElement("button");
+b.innerText=name;
 
-btn.onclick = ()=>{
-
-layerMap[name].visible = !layerMap[name].visible;
-
-btn.style.opacity = layerMap[name].visible ? "1":"0.3";
-
+b.onclick=()=>{
+layerMap[name].visible=!layerMap[name].visible;
+b.style.opacity=layerMap[name].visible?1:0.3;
 };
 
-div.appendChild(btn);
-ui.appendChild(div);
+d.appendChild(b);
+ui.appendChild(d);
 
 });
 
@@ -301,53 +284,32 @@ ui.appendChild(div);
 
 function zoomExtents(){
 
-let box = new THREE.Box3().setFromObject(dxfGroup);
-let size = box.getSize(new THREE.Vector3());
-let center = box.getCenter(new THREE.Vector3());
+let box=new THREE.Box3().setFromObject(dxfGroup);
+
+let size=box.getSize(new THREE.Vector3());
+let center=box.getCenter(new THREE.Vector3());
 
 controls.target.copy(center);
 
-let max = Math.max(size.x,size.y);
+let max=Math.max(size.x,size.y);
 
-let dist = max / Math.tan((camera.fov*Math.PI/180)/2);
+let dist=max/Math.tan((camera.fov*Math.PI/180)/2);
+
 camera.position.set(center.x,center.y,dist*1.2);
 
-camera.updateProjectionMatrix();
 }
 
 function setTheme(){
 
-dark = !dark;
+dark=!dark;
 
-scene.background = new THREE.Color(dark ? 0x111111 : 0x707070);
-
-}
-
-function onMeasure(e){
-
-mouse.x = (e.clientX/window.innerWidth)*2-1;
-mouse.y = -(e.clientY/window.innerHeight)*2+1;
-
-raycaster.setFromCamera(mouse,camera);
-
-let point = raycaster.ray.origin.clone().add(
-raycaster.ray.direction.clone().multiplyScalar(1000)
+scene.background=new THREE.Color(
+dark?0x111111:0x707070
 );
 
-measurePoints.push(point);
-
-if(measurePoints.length === 2){
-
-let dist = measurePoints[0].distanceTo(measurePoints[1]);
-
-document.getElementById("measure").innerText =
-"Ölçü: " + dist.toFixed(2);
-
-measurePoints = [];
-
 }
 
-}
+function animate(){}
 
 </script>
 
