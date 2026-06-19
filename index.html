@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profesyonel DXF Görüntüleyici</title>
+    <title>Profesyonel DXF Görüntüleyici (Standalone)</title>
     <style>
         body {
             margin: 0;
             padding: 0;
             overflow: hidden;
-            background-color: #1a1a1a;
+            background-color: #151515;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             color: #fff;
         }
@@ -24,20 +24,19 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            background: rgba(0, 0, 0, 0.75);
+            background: rgba(20, 20, 20, 0.9);
             padding: 20px;
             border-radius: 8px;
             border: 2px dashed #444;
             z-index: 10;
             transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         }
         #drop-zone.hover {
             border-color: #00adb5;
             background: rgba(0, 173, 181, 0.1);
         }
-        #file-input {
-            display: none;
-        }
+        #file-input { display: none; }
         .btn {
             background: #00adb5;
             color: white;
@@ -54,60 +53,108 @@
             position: absolute;
             bottom: 20px;
             left: 20px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 10px 15px;
+            background: rgba(20, 20, 20, 0.9);
+            padding: 12px 18px;
             border-radius: 5px;
-            font-size: 12px;
+            font-size: 13px;
             pointer-events: none;
             z-index: 10;
-            max-height: 200px;
-            overflow-y: auto;
+            border-left: 4px solid #00adb5;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         }
     </style>
+    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.lic.min.js"></script>
+    
+    <script>
+        // Minimalist ve Hata Toleranslı Custom DXF Parser Motoru
+        const CustomDxfParser = {
+            parse: function(text) {
+                const lines = text.split(/\r\n|\r|\n/);
+                const entities = [];
+                let currentEntity = null;
+                let groupCode = null;
+                
+                for (let i = 0; i < lines.length; i += 2) {
+                    if(!lines[i]) continue;
+                    groupCode = parseInt(lines[i].trim(), 10);
+                    const value = lines[i + 1] ? lines[i + 1].trim() : '';
+                    
+                    if (groupCode === 0) { // Yeni bir obje veya section başladı
+                        if (currentEntity) {
+                            entities.push(currentEntity);
+                        }
+                        if (['LINE', 'LWPOLYLINE', 'POLYLINE', 'VERTEX'].includes(value)) {
+                            currentEntity = { type: value, vertices: [] };
+                        } else {
+                            currentEntity = null;
+                        }
+                    } else if (currentEntity) {
+                        // LINE koordinatları
+                        if (currentEntity.type === 'LINE') {
+                            if (groupCode === 10) currentEntity.x1 = parseFloat(value);
+                            if (groupCode === 20) currentEntity.y1 = parseFloat(value);
+                            if (groupCode === 30) currentEntity.z1 = parseFloat(value);
+                            if (groupCode === 11) currentEntity.x2 = parseFloat(value);
+                            if (groupCode === 21) currentEntity.y2 = parseFloat(value);
+                            if (groupCode === 31) currentEntity.z2 = parseFloat(value);
+                        }
+                        // LWPOLYLINE vertex koordinatları
+                        if (currentEntity.type === 'LWPOLYLINE') {
+                            if (groupCode === 70) currentEntity.closed = (parseInt(value, 10) & 1) === 1;
+                            if (groupCode === 10) {
+                                currentEntity.vertices.push({ x: parseFloat(value), y: 0, z: 0 });
+                            }
+                            if (groupCode === 20 && currentEntity.vertices.length > 0) {
+                                currentEntity.vertices[currentEntity.vertices.length - 1].y = parseFloat(value);
+                            }
+                        }
+                    }
+                }
+                if (currentEntity) entities.push(currentEntity);
+                return entities;
+            }
+        };
+    </script>
 </head>
 <body>
 
     <div id="drop-zone">
-        <h3>DXF Görüntüleyici</h3>
-        <p>Dosyayı buraya sürükleyin veya</p>
+        <h3>Profesyonel DXF Görüntüleyici</h3>
+        <p>AutoCAD 2000 ASCII DXF dosyasını buraya sürükleyin</p>
         <label for="file-input" class="btn">Dosya Seç</label>
         <input type="file" id="file-input" accept=".dxf">
     </div>
 
-    <div id="info">Dosya bekleniyor... Mause sol tık ile döndürebilir, sağ tık ile kaydırabilir, tekerlek ile yaklaşabilirsiniz.</div>
+    <div id="info">Dosya bekleniyor... Kaydırmak için mouse sağ tıkını, yaklaşmak için tekerleği kullanın.</div>
     <div id="canvas-container"></div>
 
     <script>
-        // --- 1. Sahnelerin Kurulumu ---
+        // --- 1. Three.js Sahne Kurulumu ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a1a);
+        scene.background = new THREE.Color(0x151515);
 
-        // CAD/Mimari projeler için Ortografik (Paralel) kamera en doğrusudur
         const aspect = window.innerWidth / window.innerHeight;
-        const camera = new THREE.OrthographicCamera(-100 * aspect, 100 * aspect, 100, -100, 1, 20000);
-        camera.position.set(0, 0, 1000); // Üstten bakış (2D planlar için)
+        const camera = new THREE.OrthographicCamera(-100 * aspect, 100 * aspect, 100, -100, 1, 100000);
+        camera.position.set(0, 0, 5000);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
         container.appendChild(renderer.domElement);
 
-        // Kamera Kontrolleri
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
-        controls.enableRotate = true; // 3D incelemek istersen döndürmeyi açabilirsin
-        controls.screenSpacePanning = true; // CAD yazılımlarındaki gibi sağ tık kaydırma
+        controls.enableRotate = false; // Harita/Plan modu için rotasyon kapalı
+        controls.screenSpacePanning = true;
 
-        // Eksen çizgileri (Orijini görmek için hafifçe ekleyelim)
-        const axesHelper = new THREE.AxesHelper(50);
-        scene.add(axesHelper);
+        // Orijin Göstergesi
+        scene.add(new THREE.AxesHelper(100));
 
-        let currentDxfMesh = null;
+        let currentLineMesh = null;
 
-        // --- 2. Sürükle Bırak ve Dosya İşlemleri ---
+        // --- 2. Dosya Yakalama Mimarisi ---
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('file-input');
         const infoDiv = document.getElementById('info');
@@ -124,100 +171,81 @@
         });
 
         function handleFile(file) {
-            infoDiv.innerHTML = "Dosya okunuyor ve parse ediliyor...";
+            infoDiv.innerHTML = "Dosya ikili metin olarak okunuyor...";
             const reader = new FileReader();
             reader.onload = function(e) {
-                const fileText = e.target.result;
                 try {
-                    const parser = new DxfParser();
-                    const dxf = parser.parseSync(fileText);
-                    renderDxf(dxf, file.name);
+                    const entities = CustomDxfParser.parse(e.target.result);
+                    renderDxfEntities(entities, file.name);
                 } catch (err) {
                     console.error(err);
-                    infoDiv.innerHTML = "<span style='color:red;'>Hata: DXF dosyası parse edilemedi!</span>";
+                    infoDiv.innerHTML = "<span style='color:#ff5a5a;'>Renderer Hatası! Konsolu inceleyin.</span>";
                 }
             };
             reader.readAsText(file);
         }
 
-        // --- 3. DXF Verisini Three.js Geometrisine Dönüştürme (Renderer) ---
-        function renderDxf(dxf, fileName) {
-            // Eğer önceden yüklenmiş bir çizim varsa sahneden temizle
-            if (currentDxfMesh) scene.remove(currentDxfMesh);
+        // --- 3. Custom Renderer Logic ---
+        function renderDxfEntities(entities, fileName) {
+            if (currentLineMesh) scene.remove(currentLineMesh);
 
-            infoDiv.innerHTML = `<b>${fileName}</b> işleniyor...<br>`;
-            
-            // Performans için tüm noktaları tek bir büyük dizide toplayacağız (BufferGeometry)
             const points = [];
-            
-            // DXF içindeki tüm ENTITIES (objeleri) dönüyoruz
-            dxf.entities.forEach(entity => {
-                // Şimdilik en temel iki yapı olan LINE ve POLYLINE/LWPOLYLINE işleyelim
+
+            entities.forEach(entity => {
                 if (entity.type === 'LINE') {
-                    points.push(entity.vertices[0].x, entity.vertices[0].y, entity.vertices[0].z || 0);
-                    points.push(entity.vertices[1].x, entity.vertices[1].y, entity.vertices[1].z || 0);
+                    points.push(entity.x1 || 0, entity.y1 || 0, entity.z1 || 0);
+                    points.push(entity.x2 || 0, entity.y2 || 0, entity.z2 || 0);
                 } 
-                else if ((entity.type === 'POLYLINE' || entity.type === 'LWPOLYLINE') && entity.vertices) {
+                else if (entity.type === 'LWPOLYLINE' && entity.vertices.length > 1) {
                     for (let i = 0; i < entity.vertices.length - 1; i++) {
-                        points.push(entity.vertices[i].x, entity.vertices[i].y, entity.vertices[i].z || 0);
-                        points.push(entity.vertices[i+1].x, entity.vertices[i+1].y, entity.vertices[i+1].z || 0);
+                        points.push(entity.vertices[i].x, entity.vertices[i].y, 0);
+                        points.push(entity.vertices[i+1].x, entity.vertices[i+1].y, 0);
                     }
-                    // Eğer polyline kapalıysa son noktayı ilk noktaya bağla
-                    if (entity.shape || entity.closed) {
-                        const first = entity.vertices[0];
-                        const last = entity.vertices[entity.vertices.length - 1];
-                        points.push(last.x, last.y, last.z || 0);
-                        points.push(first.x, first.y, first.z || 0);
+                    if (entity.closed) {
+                        points.push(entity.vertices[entity.vertices.length - 1].x, entity.vertices[entity.vertices.length - 1].y, 0);
+                        points.push(entity.vertices[0].x, entity.vertices[0].y, 0);
                     }
                 }
-                // İleride ARC, CIRCLE, SPLINE ve TEXT yapılarını buraya custom renderer mantığınla ekleyebilirsin.
             });
 
             if (points.length === 0) {
-                infoDiv.innerHTML += "<br><span style='color:yellow;'>Uyarı: Çizilebilir LINE veya POLYLINE bulunamadı.</span>";
+                infoDiv.innerHTML = "<span style='color:yellow;'>Çizilebilir lineer obje bulunamadı (Katmanlar boş veya desteklenmiyor olabilir).</span>";
                 return;
             }
 
-            // GPU dostu BufferGeometry oluşturma
+            // Tek bir büyük buffer oluşturup GPU'ya itiyoruz
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
-
-            // Klasik beyaz CAD çizgisi materyali
-            const material = new THREE.LineBasicMaterial({ color: 0xffffff });
             
-            // Çizgileri segmentler halinde sahneye basıyoruz
-            currentDxfMesh = new THREE.LineSegments(geometry, material);
-            scene.add(currentDxfMesh);
+            const material = new THREE.LineBasicMaterial({ color: 0x00adb5 });
+            currentLineMesh = new THREE.LineSegments(geometry, material);
+            scene.add(currentLineMesh);
 
-            // --- 4. Zoom to Fit (Kamerayı Çizime Göre Odaklama) ---
+            // --- 4. Otomatik Kamera Boyutlandırma (Zoom to Fit) ---
             geometry.computeBoundingBox();
             const box = geometry.boundingBox;
-            
-            // Çizimin merkezini bul ve kamerayı/kontrolleri oraya eşitle
             const center = new THREE.Vector3();
             box.getCenter(center);
             controls.target.copy(center);
 
-            // Çizimin boyutunu hesapla ve kameranın görüş alanını (frustum) ayarla
             const size = new THREE.Vector3();
             box.getSize(size);
             const maxDim = Math.max(size.x, size.y);
             
-            const padding = 1.2; // Kenarlarda boşluk bırakmak için
+            const padding = 1.15;
             camera.top = maxDim / 2 * padding;
             camera.bottom = -maxDim / 2 * padding;
             camera.left = (-maxDim / 2 * aspect) * padding;
             camera.right = (maxDim / 2 * aspect) * padding;
             
-            // Kamerayı objenin tam üstüne taşı ve güncelle
-            camera.position.set(center.x, center.y, Math.max(size.z * 2, 1000));
+            camera.position.set(center.x, center.y, 5000);
             camera.updateProjectionMatrix();
             controls.update();
 
-            infoDiv.innerHTML += `<br>Başarıyla yüklendi! Obje Sayısı: ~${Math.floor(points.length/6)}`;
+            infoDiv.innerHTML = `<b>${fileName}</b> yüklendi.<br>Çizgi Sayısı: ~${Math.floor(points.length / 6)}`;
         }
 
-        // --- 5. Animasyon Döngüsü ve Pencere Yeniden Boyutlandırma ---
+        // --- 5. Render Loop ---
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
@@ -225,18 +253,14 @@
         }
         animate();
 
-        window.addEventListener('resize', onWindowResize, false);
-        function onWindowResize() {
+        window.addEventListener('resize', () => {
             const newAspect = window.innerWidth / window.innerHeight;
-            
-            // Ortografik kameranın oranlarını güncelle
             const height = camera.top - camera.bottom;
             camera.left = -height * newAspect / 2;
             camera.right = height * newAspect / 2;
-            
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-        }
+        });
     </script>
 </body>
 </html>
