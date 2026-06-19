@@ -1,259 +1,242 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-<meta charset="UTF-8">
-<title>DXF Viewer FIXED</title>
-
-<style>
-body{
-    margin:0;
-    overflow:hidden;
-    background:#707070;
-    font-family:Arial;
-}
-
-#viewer{width:100vw;height:100vh;}
-
-#ui{
-    position:absolute;
-    top:10px;
-    left:10px;
-    z-index:10;
-    background:rgba(0,0,0,0.6);
-    padding:10px;
-    border-radius:10px;
-    color:white;
-    width:250px;
-}
-
-.layer-btn{
-    display:block;
-    width:100%;
-    margin-top:5px;
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profesyonel DXF Görüntüleyici</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #fff;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        #drop-zone {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.75);
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px dashed #444;
+            z-index: 10;
+            transition: all 0.3s ease;
+        }
+        #drop-zone.hover {
+            border-color: #00adb5;
+            background: rgba(0, 173, 181, 0.1);
+        }
+        #file-input {
+            display: none;
+        }
+        .btn {
+            background: #00adb5;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+            display: inline-block;
+        }
+        .btn:hover { background: #008f95; }
+        #info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 10;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.lic.min.js"></script>
 </head>
-
 <body>
 
-<div id="ui">
-<input type="file" id="file" accept=".dxf">
-<button onclick="zoomExtents()">Zoom</button>
-<button onclick="toggleTheme()">Theme</button>
-<div id="layers"></div>
-</div>
-
-<div id="viewer"></div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-
-<script>
-
-let scene,camera,renderer,controls;
-let group = new THREE.Group();
-let layers = {};
-let dark = true;
-
-init();
-
-function init(){
-
-scene = new THREE.Scene();
-scene.background = new THREE.Color(0x707070);
-
-camera = new THREE.PerspectiveCamera(60,innerWidth/innerHeight,1,100000);
-camera.position.set(0,0,1000);
-
-renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(innerWidth,innerHeight);
-document.getElementById("viewer").appendChild(renderer.domElement);
-
-controls = new THREE.OrbitControls(camera,renderer.domElement);
-controls.enableDamping = true;
-
-controls.mouseButtons = {
-LEFT: THREE.MOUSE.ROTATE,
-MIDDLE: THREE.MOUSE.PAN,
-RIGHT: THREE.MOUSE.DOLLY
-};
-
-scene.add(group);
-
-window.addEventListener("resize",()=>{
-camera.aspect = innerWidth/innerHeight;
-camera.updateProjectionMatrix();
-renderer.setSize(innerWidth,innerHeight);
-});
-
-animate();
-
-}
-
-function animate(){
-requestAnimationFrame(animate);
-controls.update();
-renderer.render(scene,camera);
-}
-
-document.getElementById("file").addEventListener("change",e=>{
-
-let file=e.target.files[0];
-if(!file) return;
-
-let reader=new FileReader();
-
-reader.onload=ev=>{
-
-try{
-
-clear();
-
-const parser=new DxfParser();
-const dxf=parser.parseSync(ev.target.result);
-
-console.log("DXF loaded:",dxf);
-
-dxf.entities.forEach(ent=>{
-draw(ent);
-});
-
-buildLayers();
-
-zoomExtents();
-
-}catch(err){
-console.error(err);
-alert(err.message);
-}
-
-};
-
-reader.readAsText(file);
-
-});
-
-function clear(){
-while(group.children.length){
-group.remove(group.children[0]);
-}
-layers={};
-document.getElementById("layers").innerHTML="";
-}
-
-function getLayer(name){
-if(!layers[name]){
-let g=new THREE.Group();
-g.visible=true;
-layers[name]=g;
-group.add(g);
-}
-return layers[name];
-}
-
-function color(layer){
-let h=0;
-for(let i=0;i<layer.length;i++){
-h=layer.charCodeAt(i)+((h<<5)-h);
-}
-return new THREE.Color(h & 0xffffff);
-}
-
-function draw(e){
-
-let layer = getLayer(e.layer || "0");
-
-let mat = new THREE.LineBasicMaterial({
-color: color(e.layer || "0")
-});
-
-if(e.type==="LINE"){
-
-const geo=new THREE.BufferGeometry().setFromPoints([
-new THREE.Vector3(e.vertices[0].x,e.vertices[0].y,0),
-new THREE.Vector3(e.vertices[1].x,e.vertices[1].y,0)
-]);
-
-layer.add(new THREE.Line(geo,mat));
-}
-
-if(e.type==="LWPOLYLINE"){
-
-const pts=e.vertices.map(v=>new THREE.Vector3(v.x,v.y,0));
-
-layer.add(new THREE.Line(
-new THREE.BufferGeometry().setFromPoints(pts),
-mat
-));
-}
-
-if(e.type==="CIRCLE"){
-
-let curve=new THREE.EllipseCurve(
-e.center.x,e.center.y,
-e.radius,e.radius,
-0,Math.PI*2
-);
-
-let pts=curve.getPoints(50);
-
-layer.add(new THREE.Line(
-new THREE.BufferGeometry().setFromPoints(
-pts.map(p=>new THREE.Vector3(p.x,p.y,0))
-),
-mat
-));
-}
-
-}
-
-function buildLayers(){
-
-let ui=document.getElementById("layers");
-
-Object.keys(layers).forEach(name=>{
-
-let btn=document.createElement("button");
-btn.className="layer-btn";
-btn.innerText=name;
-
-btn.onclick=()=>{
-
-layers[name].visible=!layers[name].visible;
-btn.style.opacity=layers[name].visible?1:0.3;
-
-};
-
-ui.appendChild(btn);
-
-});
-
-}
-
-function zoomExtents(){
-
-let box=new THREE.Box3().setFromObject(group);
-
-let center=box.getCenter(new THREE.Vector3());
-let size=box.getSize(new THREE.Vector3());
-
-controls.target.copy(center);
-
-let max=Math.max(size.x,size.y);
-
-let dist=max/Math.tan((camera.fov*Math.PI/180)/2);
-
-camera.position.set(center.x,center.y,dist*1.2);
-
-}
-
-function toggleTheme(){
-dark=!dark;
-scene.background=new THREE.Color(dark?0x111111:0x707070);
-}
-
-</script>
-
+    <div id="drop-zone">
+        <h3>DXF Görüntüleyici</h3>
+        <p>Dosyayı buraya sürükleyin veya</p>
+        <label for="file-input" class="btn">Dosya Seç</label>
+        <input type="file" id="file-input" accept=".dxf">
+    </div>
+
+    <div id="info">Dosya bekleniyor... Mause sol tık ile döndürebilir, sağ tık ile kaydırabilir, tekerlek ile yaklaşabilirsiniz.</div>
+    <div id="canvas-container"></div>
+
+    <script>
+        // --- 1. Sahnelerin Kurulumu ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+
+        // CAD/Mimari projeler için Ortografik (Paralel) kamera en doğrusudur
+        const aspect = window.innerWidth / window.innerHeight;
+        const camera = new THREE.OrthographicCamera(-100 * aspect, 100 * aspect, 100, -100, 1, 20000);
+        camera.position.set(0, 0, 1000); // Üstten bakış (2D planlar için)
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        // Kamera Kontrolleri
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableRotate = true; // 3D incelemek istersen döndürmeyi açabilirsin
+        controls.screenSpacePanning = true; // CAD yazılımlarındaki gibi sağ tık kaydırma
+
+        // Eksen çizgileri (Orijini görmek için hafifçe ekleyelim)
+        const axesHelper = new THREE.AxesHelper(50);
+        scene.add(axesHelper);
+
+        let currentDxfMesh = null;
+
+        // --- 2. Sürükle Bırak ve Dosya İşlemleri ---
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const infoDiv = document.getElementById('info');
+
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('hover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('hover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('hover');
+            if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
+        });
+
+        function handleFile(file) {
+            infoDiv.innerHTML = "Dosya okunuyor ve parse ediliyor...";
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const fileText = e.target.result;
+                try {
+                    const parser = new DxfParser();
+                    const dxf = parser.parseSync(fileText);
+                    renderDxf(dxf, file.name);
+                } catch (err) {
+                    console.error(err);
+                    infoDiv.innerHTML = "<span style='color:red;'>Hata: DXF dosyası parse edilemedi!</span>";
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // --- 3. DXF Verisini Three.js Geometrisine Dönüştürme (Renderer) ---
+        function renderDxf(dxf, fileName) {
+            // Eğer önceden yüklenmiş bir çizim varsa sahneden temizle
+            if (currentDxfMesh) scene.remove(currentDxfMesh);
+
+            infoDiv.innerHTML = `<b>${fileName}</b> işleniyor...<br>`;
+            
+            // Performans için tüm noktaları tek bir büyük dizide toplayacağız (BufferGeometry)
+            const points = [];
+            
+            // DXF içindeki tüm ENTITIES (objeleri) dönüyoruz
+            dxf.entities.forEach(entity => {
+                // Şimdilik en temel iki yapı olan LINE ve POLYLINE/LWPOLYLINE işleyelim
+                if (entity.type === 'LINE') {
+                    points.push(entity.vertices[0].x, entity.vertices[0].y, entity.vertices[0].z || 0);
+                    points.push(entity.vertices[1].x, entity.vertices[1].y, entity.vertices[1].z || 0);
+                } 
+                else if ((entity.type === 'POLYLINE' || entity.type === 'LWPOLYLINE') && entity.vertices) {
+                    for (let i = 0; i < entity.vertices.length - 1; i++) {
+                        points.push(entity.vertices[i].x, entity.vertices[i].y, entity.vertices[i].z || 0);
+                        points.push(entity.vertices[i+1].x, entity.vertices[i+1].y, entity.vertices[i+1].z || 0);
+                    }
+                    // Eğer polyline kapalıysa son noktayı ilk noktaya bağla
+                    if (entity.shape || entity.closed) {
+                        const first = entity.vertices[0];
+                        const last = entity.vertices[entity.vertices.length - 1];
+                        points.push(last.x, last.y, last.z || 0);
+                        points.push(first.x, first.y, first.z || 0);
+                    }
+                }
+                // İleride ARC, CIRCLE, SPLINE ve TEXT yapılarını buraya custom renderer mantığınla ekleyebilirsin.
+            });
+
+            if (points.length === 0) {
+                infoDiv.innerHTML += "<br><span style='color:yellow;'>Uyarı: Çizilebilir LINE veya POLYLINE bulunamadı.</span>";
+                return;
+            }
+
+            // GPU dostu BufferGeometry oluşturma
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+
+            // Klasik beyaz CAD çizgisi materyali
+            const material = new THREE.LineBasicMaterial({ color: 0xffffff });
+            
+            // Çizgileri segmentler halinde sahneye basıyoruz
+            currentDxfMesh = new THREE.LineSegments(geometry, material);
+            scene.add(currentDxfMesh);
+
+            // --- 4. Zoom to Fit (Kamerayı Çizime Göre Odaklama) ---
+            geometry.computeBoundingBox();
+            const box = geometry.boundingBox;
+            
+            // Çizimin merkezini bul ve kamerayı/kontrolleri oraya eşitle
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+            controls.target.copy(center);
+
+            // Çizimin boyutunu hesapla ve kameranın görüş alanını (frustum) ayarla
+            const size = new THREE.Vector3();
+            box.getSize(size);
+            const maxDim = Math.max(size.x, size.y);
+            
+            const padding = 1.2; // Kenarlarda boşluk bırakmak için
+            camera.top = maxDim / 2 * padding;
+            camera.bottom = -maxDim / 2 * padding;
+            camera.left = (-maxDim / 2 * aspect) * padding;
+            camera.right = (maxDim / 2 * aspect) * padding;
+            
+            // Kamerayı objenin tam üstüne taşı ve güncelle
+            camera.position.set(center.x, center.y, Math.max(size.z * 2, 1000));
+            camera.updateProjectionMatrix();
+            controls.update();
+
+            infoDiv.innerHTML += `<br>Başarıyla yüklendi! Obje Sayısı: ~${Math.floor(points.length/6)}`;
+        }
+
+        // --- 5. Animasyon Döngüsü ve Pencere Yeniden Boyutlandırma ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            const newAspect = window.innerWidth / window.innerHeight;
+            
+            // Ortografik kameranın oranlarını güncelle
+            const height = camera.top - camera.bottom;
+            camera.left = -height * newAspect / 2;
+            camera.right = height * newAspect / 2;
+            
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
 </body>
 </html>
