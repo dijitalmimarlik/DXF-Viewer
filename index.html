@@ -1,99 +1,388 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-    <meta charset="UTF-8">
-    <title>Modern DXF Viewer</title>
-    <style>
-        :root { --bg-color: #707070; }
-        body { margin: 0; overflow: hidden; background-color: var(--bg-color); font-family: 'Inter', sans-serif; color: white; }
-        
-        #ui-layer { 
-            position: absolute; top: 25px; left: 25px; z-index: 100;
-            background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(15px);
-            padding: 24px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.2);
-            width: 280px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DXF Viewer</title>
 
-        /* Yükleniyor Ekranı */
-        #loader {
-            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: rgba(0,0,0,0.5); display: none; /* Varsayılan gizli */
-            justify-content: center; align-items: center; z-index: 999;
-            color: white; font-size: 20px;
-        }
+<style>
+:root{
+    --bg:#707070;
+}
 
-        h2 { margin: 0 0 15px 0; font-size: 20px; }
-        input[type="file"] { width: 100%; cursor: pointer; }
-        .hint { font-size: 13px; margin-top: 15px; opacity: 0.8; }
-        #viewer { width: 100vw; height: 100vh; }
-    </style>
+body{
+    margin:0;
+    overflow:hidden;
+    background:var(--bg);
+    font-family:Arial, sans-serif;
+}
+
+#viewer{
+    width:100vw;
+    height:100vh;
+}
+
+#panel{
+    position:absolute;
+    top:20px;
+    left:20px;
+    z-index:100;
+
+    background:rgba(255,255,255,.15);
+    backdrop-filter:blur(15px);
+
+    padding:20px;
+    border-radius:15px;
+
+    color:white;
+}
+
+#loader{
+    position:absolute;
+    inset:0;
+
+    display:none;
+    justify-content:center;
+    align-items:center;
+
+    background:rgba(0,0,0,.5);
+
+    color:white;
+    font-size:22px;
+
+    z-index:999;
+}
+</style>
 </head>
 <body>
 
-    <div id="loader">Dosya işleniyor, lütfen bekleyin...</div>
+<div id="loader">
+DXF yükleniyor...
+</div>
 
-    <div id="ui-layer">
-        <h2>DWG/DXF Görüntüleyici</h2>
-        <input type="file" id="fileInput" accept=".dxf">
-        <p class="hint">Dosya yüklendikten sonra tarayıcıyı dondurabilir, çok büyük dosyalarda biraz bekletir.</p>
-    </div>
+<div id="panel">
+<h3>DXF Görüntüleyici</h3>
+<input type="file" id="fileInput" accept=".dxf">
+</div>
 
-    <div id="viewer"></div>
+<div id="viewer"></div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dxf-parser@latest/dist/dxf-parser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three-dxf@latest/dist/three-dxf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dxf-parser/dist/dxf-parser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
-    <script>
-        const loader = document.getElementById('loader');
-        const viewerDiv = document.getElementById('viewer');
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x707070);
-        
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        const controls = new THREE.OrbitControls(camera, renderer.domElement);
-        
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        viewerDiv.appendChild(renderer.domElement);
-        camera.position.z = 800;
+<script>
 
-        document.getElementById('fileInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
+const viewer = document.getElementById("viewer");
+const loader = document.getElementById("loader");
 
-            loader.style.display = 'flex'; // Yükleniyor'u göster
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x707070);
 
-            // Küçük bir gecikme ekleyerek tarayıcının DOM'u güncellemesine izin veriyoruz
-            setTimeout(() => {
-                const reader = new FileReader();
-                reader.onload = function(event) {
-                    try {
-                        const parser = new DxfParser();
-                        const dxfData = parser.parseSync(event.target.result);
-                        
-                        while(scene.children.length > 0) { scene.remove(scene.children[0]); }
+const camera = new THREE.PerspectiveCamera(
+    50,
+    window.innerWidth/window.innerHeight,
+    1,
+    1000000
+);
 
-                        const group = new ThreeDxf.Viewer(dxfData, 1000, 800);
-                        scene.add(group);
-                    } catch (err) {
-                        alert("Dosya okunamadı! DXF dosyası olduğundan emin olun.");
-                        console.error(err);
-                    } finally {
-                        loader.style.display = 'none'; // İşlem bitince kapat
+camera.position.set(0,0,1000);
+
+const renderer = new THREE.WebGLRenderer({
+    antialias:true
+});
+
+renderer.setSize(
+    window.innerWidth,
+    window.innerHeight
+);
+
+viewer.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(
+    camera,
+    renderer.domElement
+);
+
+controls.enableDamping = true;
+
+const dxfGroup = new THREE.Group();
+scene.add(dxfGroup);
+
+const material = new THREE.LineBasicMaterial({
+    color:0xffffff
+});
+
+function clearDXF(){
+
+    while(dxfGroup.children.length){
+        dxfGroup.remove(dxfGroup.children[0]);
+    }
+
+}
+
+function addLine(entity){
+
+    const pts = entity.vertices.map(v =>
+        new THREE.Vector3(v.x,v.y,0)
+    );
+
+    const geometry =
+        new THREE.BufferGeometry().setFromPoints(pts);
+
+    const line = new THREE.Line(
+        geometry,
+        material
+    );
+
+    dxfGroup.add(line);
+}
+
+function addPolyline(entity){
+
+    const pts = entity.vertices.map(v =>
+        new THREE.Vector3(v.x,v.y,0)
+    );
+
+    if(entity.shape){
+        pts.push(
+            new THREE.Vector3(
+                entity.vertices[0].x,
+                entity.vertices[0].y,
+                0
+            )
+        );
+    }
+
+    const geometry =
+        new THREE.BufferGeometry().setFromPoints(pts);
+
+    const line = new THREE.Line(
+        geometry,
+        material
+    );
+
+    dxfGroup.add(line);
+}
+
+function addCircle(entity){
+
+    const curve = new THREE.EllipseCurve(
+        entity.center.x,
+        entity.center.y,
+        entity.radius,
+        entity.radius,
+        0,
+        Math.PI*2,
+        false,
+        0
+    );
+
+    const pts = curve.getPoints(100);
+
+    const geometry =
+        new THREE.BufferGeometry().setFromPoints(
+            pts.map(p=>new THREE.Vector3(p.x,p.y,0))
+        );
+
+    const circle =
+        new THREE.Line(
+            geometry,
+            material
+        );
+
+    dxfGroup.add(circle);
+}
+
+function addArc(entity){
+
+    const start =
+        THREE.MathUtils.degToRad(
+            entity.startAngle
+        );
+
+    const end =
+        THREE.MathUtils.degToRad(
+            entity.endAngle
+        );
+
+    const curve = new THREE.EllipseCurve(
+        entity.center.x,
+        entity.center.y,
+        entity.radius,
+        entity.radius,
+        start,
+        end,
+        false,
+        0
+    );
+
+    const pts = curve.getPoints(80);
+
+    const geometry =
+        new THREE.BufferGeometry().setFromPoints(
+            pts.map(p=>new THREE.Vector3(p.x,p.y,0))
+        );
+
+    const arc =
+        new THREE.Line(
+            geometry,
+            material
+        );
+
+    dxfGroup.add(arc);
+}
+
+function fitView(){
+
+    const box = new THREE.Box3()
+        .setFromObject(dxfGroup);
+
+    const size = box.getSize(
+        new THREE.Vector3()
+    );
+
+    const center = box.getCenter(
+        new THREE.Vector3()
+    );
+
+    controls.target.copy(center);
+
+    const maxDim = Math.max(
+        size.x,
+        size.y
+    );
+
+    const fov =
+        camera.fov * Math.PI / 180;
+
+    let distance =
+        maxDim /
+        (2*Math.tan(fov/2));
+
+    distance *= 1.5;
+
+    camera.position.set(
+        center.x,
+        center.y,
+        distance
+    );
+
+    camera.lookAt(center);
+
+    controls.update();
+}
+
+document
+.getElementById("fileInput")
+.addEventListener("change",e=>{
+
+    const file = e.target.files[0];
+
+    if(!file) return;
+
+    loader.style.display="flex";
+
+    setTimeout(()=>{
+
+        const reader = new FileReader();
+
+        reader.onload = ev=>{
+
+            try{
+
+                clearDXF();
+
+                const parser =
+                    new DxfParser();
+
+                const dxf =
+                    parser.parseSync(
+                        ev.target.result
+                    );
+
+                dxf.entities.forEach(entity=>{
+
+                    switch(entity.type){
+
+                        case "LINE":
+                            addLine(entity);
+                            break;
+
+                        case "LWPOLYLINE":
+                        case "POLYLINE":
+                            addPolyline(entity);
+                            break;
+
+                        case "CIRCLE":
+                            addCircle(entity);
+                            break;
+
+                        case "ARC":
+                            addArc(entity);
+                            break;
                     }
-                };
-                reader.readAsText(file);
-            }, 100);
-        });
 
-        function animate() {
-            requestAnimationFrame(animate);
-            controls.update();
-            renderer.render(scene, camera);
-        }
-        animate();
-    </script>
+                });
+
+                fitView();
+
+            }
+            catch(err){
+
+                console.error(err);
+
+                alert(
+                    "DXF okunamadı."
+                );
+
+            }
+            finally{
+
+                loader.style.display="none";
+
+            }
+
+        };
+
+        reader.readAsText(file);
+
+    },100);
+
+});
+
+window.addEventListener("resize",()=>{
+
+    camera.aspect =
+        window.innerWidth /
+        window.innerHeight;
+
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(
+        window.innerWidth,
+        window.innerHeight
+    );
+
+});
+
+function animate(){
+
+    requestAnimationFrame(
+        animate
+    );
+
+    controls.update();
+
+    renderer.render(
+        scene,
+        camera
+    );
+}
+
+animate();
+
+</script>
+
 </body>
 </html>
