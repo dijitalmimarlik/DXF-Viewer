@@ -3,22 +3,88 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profesyonel DXF Görüntüleyici (Standalone)</title>
+    <title>Profesyonel Web CAD Görüntüleyici</title>
     <style>
         body {
             margin: 0;
             padding: 0;
             overflow: hidden;
-            background-color: #151515;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            color: #fff;
+            background-color: #111;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            display: flex;
+            color: #eee;
+        }
+        /* CAD Katman Yönetim Paneli (Sidebar) */
+        #sidebar {
+            width: 280px;
+            height: 100vh;
+            background-color: #181818;
+            border-right: 1px solid #2d2d2d;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            z-index: 20;
+            box-shadow: 5px 0 15px rgba(0,0,0,0.3);
+        }
+        #sidebar h2 {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 0;
+            padding: 15px;
+            background-color: #222;
+            border-bottom: 1px solid #2d2d2d;
+            color: #00adb5;
+        }
+        #layer-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .layer-row {
+            display: flex;
+            align-items: center;
+            padding: 6px 8px;
+            margin-bottom: 4px;
+            border-radius: 4px;
+            background-color: #1f1f1f;
+            font-size: 12px;
+            user-select: none;
+            border: 1px solid transparent;
+        }
+        .layer-row:hover {
+            background-color: #262626;
+            border-color: #333;
+        }
+        .layer-row input[type="checkbox"] {
+            margin-right: 10px;
+            cursor: pointer;
+            accent-color: #00adb5;
+        }
+        .layer-color-box {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            margin-right: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+            display: inline-block;
+        }
+        .layer-name {
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #ccc;
+        }
+        /* Çizim Alanı */
+        #viewport-container {
+            flex: 1;
+            position: relative;
+            height: 100vh;
         }
         #canvas-container {
-            width: 100vw;
-            height: 100vh;
-            position: absolute;
-            top: 0;
-            left: 0;
+            width: 100%;
+            height: 100%;
         }
         #drop-zone {
             position: absolute;
@@ -26,11 +92,10 @@
             left: 20px;
             background: rgba(20, 20, 20, 0.9);
             padding: 20px;
-            border-radius: 8px;
+            border-radius: 6px;
             border: 2px dashed #444;
             z-index: 10;
             transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         }
         #drop-zone.hover {
             border-color: #00adb5;
@@ -41,12 +106,13 @@
             background: #00adb5;
             color: white;
             border: none;
-            padding: 8px 16px;
+            padding: 6px 14px;
             border-radius: 4px;
             cursor: pointer;
             font-weight: bold;
             margin-top: 10px;
             display: inline-block;
+            font-size: 12px;
         }
         .btn:hover { background: #008f95; }
         #info {
@@ -54,198 +120,450 @@
             bottom: 20px;
             left: 20px;
             background: rgba(20, 20, 20, 0.9);
-            padding: 12px 18px;
-            border-radius: 5px;
-            font-size: 13px;
+            padding: 10px 15px;
+            border-radius: 4px;
+            font-size: 12px;
             pointer-events: none;
             z-index: 10;
-            border-left: 4px solid #00adb5;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            border-left: 3px solid #00adb5;
         }
     </style>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    
-    <script>
-        // Minimalist ve Hata Toleranslı Custom DXF Parser Motoru
-        const CustomDxfParser = {
-            parse: function(text) {
-                const lines = text.split(/\r\n|\r|\n/);
-                const entities = [];
-                let currentEntity = null;
-                let groupCode = null;
-                
-                for (let i = 0; i < lines.length; i += 2) {
-                    if(!lines[i]) continue;
-                    groupCode = parseInt(lines[i].trim(), 10);
-                    const value = lines[i + 1] ? lines[i + 1].trim() : '';
-                    
-                    if (groupCode === 0) { // Yeni bir obje veya section başladı
-                        if (currentEntity) {
-                            entities.push(currentEntity);
-                        }
-                        if (['LINE', 'LWPOLYLINE', 'POLYLINE', 'VERTEX'].includes(value)) {
-                            currentEntity = { type: value, vertices: [] };
-                        } else {
-                            currentEntity = null;
-                        }
-                    } else if (currentEntity) {
-                        // LINE koordinatları
-                        if (currentEntity.type === 'LINE') {
-                            if (groupCode === 10) currentEntity.x1 = parseFloat(value);
-                            if (groupCode === 20) currentEntity.y1 = parseFloat(value);
-                            if (groupCode === 30) currentEntity.z1 = parseFloat(value);
-                            if (groupCode === 11) currentEntity.x2 = parseFloat(value);
-                            if (groupCode === 21) currentEntity.y2 = parseFloat(value);
-                            if (groupCode === 31) currentEntity.z2 = parseFloat(value);
-                        }
-                        // LWPOLYLINE vertex koordinatları
-                        if (currentEntity.type === 'LWPOLYLINE') {
-                            if (groupCode === 70) currentEntity.closed = (parseInt(value, 10) & 1) === 1;
-                            if (groupCode === 10) {
-                                currentEntity.vertices.push({ x: parseFloat(value), y: 0, z: 0 });
-                            }
-                            if (groupCode === 20 && currentEntity.vertices.length > 0) {
-                                currentEntity.vertices[currentEntity.vertices.length - 1].y = parseFloat(value);
-                            }
-                        }
-                    }
-                }
-                if (currentEntity) entities.push(currentEntity);
-                return entities;
-            }
-        };
-    </script>
 </head>
 <body>
 
-    <div id="drop-zone">
-        <h3>Profesyonel DXF Görüntüleyici</h3>
-        <p>AutoCAD 2000 ASCII DXF dosyasını buraya sürükleyin</p>
-        <label for="file-input" class="btn">Dosya Seç</label>
-        <input type="file" id="file-input" accept=".dxf">
+    <div id="sidebar">
+        <h2>CAD Katman Yönetimi</h2>
+        <div id="layer-list">
+            <p style="color:#666; font-size:12px; padding:10px; text-align:center;">Dosya yüklendiğinde katman mimarisi burada çözümlenecektir.</p>
+        </div>
     </div>
 
-    <div id="info">Dosya bekleniyor... Kaydırmak için mouse sağ tıkını, yaklaşmak için tekerleği kullanın.</div>
-    <div id="canvas-container"></div>
+    <div id="viewport-container">
+        <div id="drop-zone">
+            <h3 style="margin:0 0 5px 0; font-size:14px;">CAD Proje Yükle</h3>
+            <p style="margin:0; font-size:12px; color:#aaa;">AutoCAD R14/2000 ASCII DXF dosyasını sürükleyin</p>
+            <label for="file-input" class="btn">Dosya Seç</label>
+            <input type="file" id="file-input" accept=".dxf">
+        </div>
+        <div id="info">CAD Navigasyonu: Sürüklemek için Mouse Sağ Tık, Yaklaşmak için Tekerlek.</div>
+        <div id="canvas-container"></div>
+    </div>
 
     <script>
-        // --- 1. Three.js Sahne Kurulumu ---
+        // --- 1. AutoCAD Renk Tablosu (ACI - AutoCAD Color Index) Çözücü ---
+        function aciToHex(aci) {
+            const standardColors = {
+                1: 0xff0000, // Red
+                2: 0xffff00, // Yellow
+                3: 0x00ff00, // Green
+                4: 0x00ffff, // Cyan
+                5: 0x0000ff, // Blue
+                6: 0xff00ff, // Magenta
+                7: 0xffffff, // White/Black (Koyu temada beyaz yapıyoruz)
+                8: 0x808080, // Dark Gray
+                9: 0xc0c0c0  // Light Gray
+            };
+            if (standardColors[aci] !== undefined) return standardColors[aci];
+            
+            // Genişletilmiş AutoCAD renk algoritmik eşleştirmesi (Temel yaklaşım)
+            if (aci >= 10 && aci <= 249) {
+                const colors = [0xff0000, 0xff7f00, 0xffff00, 0x7fff00, 0x00ff00, 0x00ff7f, 0x00ffff, 0x007fff, 0x0000ff, 0x7f00ff, 0xff00ff, 0xff007f];
+                return colors[Math.floor(aci / 20) % colors.length];
+            }
+            return 0xbcbcbc; // Varsayılan CAD Grisi
+        }
+
+        // --- 2. Gelişmiş CAD/DXF Parser Motoru ---
+        const AdvancedDxfEngine = {
+            parse: function(text) {
+                const lines = text.split(/\r\n|\r|\n/);
+                const layers = {};
+                const entities = [];
+                
+                let currentSection = '';
+                let inLayerTable = false;
+                let currentLayerObj = null;
+                let currentEntity = null;
+                let mainPolyline = null;
+
+                for (let i = 0; i < lines.length; i += 2) {
+                    if (lines[i] === undefined || lines[i+1] === undefined) break;
+                    
+                    const code = parseInt(lines[i].trim(), 10);
+                    const val = lines[i+1].trim();
+                    
+                    if (code === 0) {
+                        // Bölüm Değişiklikleri
+                        if (val === 'SECTION') { /* Atla */ }
+                        else if (val === 'ENDSEC') { currentSection = ''; inLayerTable = false; }
+                        
+                        if (currentSection === 'TABLES') {
+                            if (val === 'LAYER') { inLayerTable = true; currentLayerObj = {}; }
+                            else if (val === 'ENDTAB') { inLayerTable = false; }
+                        }
+                        
+                        // Mevcut objeyi kaydet
+                        if (currentEntity) {
+                            if (currentEntity.type === 'VERTEX' && mainPolyline) {
+                                mainPolyline.vertices.push({ x: currentEntity.x, y: currentEntity.y, z: currentEntity.z });
+                            } else if (currentEntity.type !== 'VERTEX') {
+                                entities.push(currentEntity);
+                            }
+                            currentEntity = null;
+                        }
+                        
+                        // Katman tablosu kaydı
+                        if (inLayerTable && currentLayerObj && currentLayerObj.name) {
+                            layers[currentLayerObj.name] = {
+                                color: currentLayerObj.color !== undefined ? aciToHex(currentLayerObj.color) : 0xffffff
+                            };
+                            currentLayerObj = (val === 'LAYER') ? {} : null;
+                        }
+                        
+                        // Yeni Geometri Ayrıştırma Başlangıcı
+                        if (val === 'POLYLINE') {
+                            currentEntity = { type: 'POLYLINE', vertices: [], layer: '0', closed: false };
+                            mainPolyline = currentEntity;
+                        } else if (val === 'VERTEX') {
+                            currentEntity = { type: 'VERTEX', x: 0, y: 0, z: 0 };
+                        } else if (val === 'SEQEND') {
+                            mainPolyline = null;
+                        } else if (['LINE', 'LWPOLYLINE', 'CIRCLE', 'ARC', 'TEXT', 'MTEXT'].includes(val)) {
+                            mainPolyline = null;
+                            currentEntity = { type: val, vertices: [], layer: '0', closed: false };
+                        }
+                    } else {
+                        // Değer Okuma Mantığı
+                        if (inLayerTable && currentLayerObj) {
+                            if (code === 2) currentLayerObj.name = val;
+                            if (code === 62) currentLayerObj.color = Math.abs(parseInt(val, 10));
+                        }
+                        
+                        if (currentEntity) {
+                            if (code === 8) currentEntity.layer = val; // Nesnenin katmanı
+                            
+                            // LINE
+                            if (currentEntity.type === 'LINE') {
+                                if (code === 10) currentEntity.x1 = parseFloat(val);
+                                if (code === 20) currentEntity.y1 = parseFloat(val);
+                                if (code === 30) currentEntity.z1 = parseFloat(val);
+                                if (code === 11) currentEntity.x2 = parseFloat(val);
+                                if (code === 21) currentEntity.y2 = parseFloat(val);
+                                if (code === 31) currentEntity.z2 = parseFloat(val);
+                            }
+                            // LWPOLYLINE
+                            else if (currentEntity.type === 'LWPOLYLINE') {
+                                if (code === 70) currentEntity.closed = (parseInt(val, 10) & 1) === 1;
+                                if (code === 10) currentEntity.vertices.push({ x: parseFloat(val), y: 0, z: 0 });
+                                if (code === 20 && currentEntity.vertices.length > 0) {
+                                    currentEntity.vertices[currentEntity.vertices.length - 1].y = parseFloat(val);
+                                }
+                            }
+                            // VERTEX (Eski Tip Standart Polyline Noktaları)
+                            else if (currentEntity.type === 'VERTEX') {
+                                if (code === 10) currentEntity.x = parseFloat(val);
+                                if (code === 20) currentEntity.y = parseFloat(val);
+                                if (code === 30) currentEntity.z = parseFloat(val);
+                            }
+                            // CIRCLE & ARC
+                            else if (currentEntity.type === 'CIRCLE' || currentEntity.type === 'ARC') {
+                                if (code === 10) currentEntity.cx = parseFloat(val);
+                                if (code === 20) currentEntity.cy = parseFloat(val);
+                                if (code === 30) currentEntity.cz = parseFloat(val);
+                                if (code === 40) currentEntity.r = parseFloat(val);
+                                if (code === 50) currentEntity.startAngle = parseFloat(val);
+                                if (code === 51) currentEntity.endAngle = parseFloat(val);
+                            }
+                            // TEXT & MTEXT
+                            else if (currentEntity.type === 'TEXT' || currentEntity.type === 'MTEXT') {
+                                if (code === 1) currentEntity.text = val;
+                                if (code === 10) currentEntity.x = parseFloat(val);
+                                if (code === 20) currentEntity.y = parseFloat(val);
+                                if (code === 30) currentEntity.z = parseFloat(val);
+                                if (code === 40) currentEntity.height = parseFloat(val);
+                            }
+                        }
+                        
+                        if (code === 2 && (val === 'TABLES' || val === 'ENTITIES')) {
+                            currentSection = val;
+                        }
+                    }
+                }
+                // Son objeyi boşta bırakma
+                if (currentEntity && currentEntity.type !== 'VERTEX') entities.push(currentEntity);
+                
+                return { layers, entities };
+            }
+        };
+
+        // --- 3. Mimaride Metin Temizleme ve Optimize Yazı Dokusu Üretimi ---
+        function cleanMText(text) {
+            return text.replace(/\\[fF].*?;/g, '') // Fontları sil
+                       .replace(/\\[A-Za-z].*?;/g, '') // Biçim kodlarını at
+                       .replace(/\\P/g, '\n') // Satır atlamaları yakala
+                       .replace(/[{}]/g, ''); // Süslü parantezleri temizle
+        }
+
+        function createTextSprite(text, height, colorHex) {
+            const cleanedText = cleanMText(text);
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const internalFontSize = 48; 
+            ctx.font = `bold ${internalFontSize}px monospace`;
+            
+            const lines = cleanedText.split('\n');
+            let maxW = 0;
+            lines.forEach(l => { const w = ctx.measureText(l).width; if(w > maxW) maxW = w; });
+            
+            canvas.width = Math.max(maxW + 20, 64);
+            canvas.height = (internalFontSize * lines.length) + 20;
+            
+            // Tekrar font ata (Boyut değişiminden sonra gerekir)
+            ctx.font = `bold ${internalFontSize}px monospace`;
+            ctx.fillStyle = '#' + colorHex.toString(16).padStart(6, '0');
+            ctx.textBaseline = 'top';
+            
+            lines.forEach((l, idx) => {
+                ctx.fillText(l, 10, idx * internalFontSize + 10);
+            });
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(material);
+            
+            const worldHeight = height || 5;
+            const worldWidth = (canvas.width / canvas.height) * worldHeight;
+            sprite.scale.set(worldWidth, worldHeight, 1);
+            return sprite;
+        }
+
+        // --- 4. Three.js Altyapısı Kurulumu ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x151515);
+        scene.background = new THREE.Color(0x111111); // Klasik CAD siyah arka planı
 
         const aspect = window.innerWidth / window.innerHeight;
-        const camera = new THREE.OrthographicCamera(-100 * aspect, 100 * aspect, 100, -100, 1, 100000);
-        camera.position.set(0, 0, 5000);
+        const camera = new THREE.OrthographicCamera(-100 * aspect, 100 * aspect, 100, -100, 1, 200000);
+        camera.position.set(0, 0, 10000);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         container.appendChild(renderer.domElement);
 
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
-        controls.enableRotate = false; // Harita/Plan modu için rotasyon kapalı
+        controls.enableRotate = false; // Saf 2D Proje Modu
         controls.screenSpacePanning = true;
 
-        // Orijin Göstergesi
-        scene.add(new THREE.AxesHelper(100));
+        let globalLayerGroups = {};
 
-        let currentLineMesh = null;
-
-        // --- 2. Dosya Yakalama Mimarisi ---
+        // --- 5. Dosya Alımı ve Akıllı Katman Yönetimi Eşleştirmesi ---
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('file-input');
-        const infoDiv = document.getElementById('info');
+        const layerListDiv = document.getElementById('layer-list');
 
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('hover'); });
         dropZone.addEventListener('dragleave', () => dropZone.classList.remove('hover'));
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('hover');
-            if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+            if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]);
         });
         fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) handleFile(e.target.files[0]);
+            if (e.target.files.length > 0) processFile(e.target.files[0]);
         });
 
-        function handleFile(file) {
-            infoDiv.innerHTML = "Dosya ikili metin olarak okunuyor...";
+        function processFile(file) {
             const reader = new FileReader();
             reader.onload = function(e) {
-                try {
-                    const entities = CustomDxfParser.parse(e.target.result);
-                    renderDxfEntities(entities, file.name);
-                } catch (err) {
-                    console.error(err);
-                    infoDiv.innerHTML = "<span style='color:#ff5a5a;'>Renderer Hatası! Konsolu inceleyin.</span>";
-                }
+                const parsedData = AdvancedDxfEngine.parse(e.target.result);
+                buildCadScene(parsedData, file.name);
             };
             reader.readAsText(file);
         }
 
-        // --- 3. Custom Renderer Logic ---
-        function renderDxfEntities(entities, fileName) {
-            if (currentLineMesh) scene.remove(currentLineMesh);
+        // --- 6. Sahneyi İnşa Eden Ana CAD Renderer Mekanizması ---
+        function buildCadScene(cadData, fileName) {
+            // Eski çizimleri ve bellek dokularını temizle (Memory leak önleme)
+            Object.values(globalLayerGroups).forEach(group => {
+                group.traverse(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (child.material.map) child.material.map.dispose();
+                        child.material.dispose();
+                    }
+                });
+                scene.remove(group);
+            });
+            globalLayerGroups = {};
+            layerListDiv.innerHTML = '';
 
-            const points = [];
+            const layerPoints = {};
+            const layerTexts = {};
 
-            entities.forEach(entity => {
+            // Objeleri katman bazlı havuzlarda toplayalım
+            cadData.entities.forEach(entity => {
+                const layerName = entity.layer || '0';
+                if (!layerPoints[layerName]) layerPoints[layerName] = [];
+                if (!layerTexts[layerName]) layerTexts[layerName] = [];
+
+                // LINE Render
                 if (entity.type === 'LINE') {
-                    points.push(entity.x1 || 0, entity.y1 || 0, entity.z1 || 0);
-                    points.push(entity.x2 || 0, entity.y2 || 0, entity.z2 || 0);
-                } 
-                else if (entity.type === 'LWPOLYLINE' && entity.vertices.length > 1) {
-                    for (let i = 0; i < entity.vertices.length - 1; i++) {
-                        points.push(entity.vertices[i].x, entity.vertices[i].y, 0);
-                        points.push(entity.vertices[i+1].x, entity.vertices[i+1].y, 0);
+                    layerPoints[layerName].push(entity.x1||0, entity.y1||0, entity.z1||0);
+                    layerPoints[layerName].push(entity.x2||0, entity.y2||0, entity.z2||0);
+                }
+                // POLYLINE / LWPOLYLINE Render
+                else if ((entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') && entity.vertices.length > 1) {
+                    const v = entity.vertices;
+                    for (let i = 0; i < v.length - 1; i++) {
+                        layerPoints[layerName].push(v[i].x, v[i].y, v[i].z||0);
+                        layerPoints[layerName].push(v[i+1].x, v[i+1].y, v[i+1].z||0);
                     }
                     if (entity.closed) {
-                        points.push(entity.vertices[entity.vertices.length - 1].x, entity.vertices[entity.vertices.length - 1].y, 0);
-                        points.push(entity.vertices[0].x, entity.vertices[0].y, 0);
+                        layerPoints[layerName].push(v[v.length-1].x, v[v.length-1].y, v[v.length-1].z||0);
+                        layerPoints[layerName].push(v[0].x, v[0].y, v[0].z||0);
                     }
+                }
+                // CIRCLE Render (64 Segmentli Yay Çizgilerine Dönüştürülür)
+                else if (entity.type === 'CIRCLE' && entity.r > 0) {
+                    const cx = entity.cx||0, cy = entity.cy||0, cz = entity.cz||0, r = entity.r;
+                    const segs = 64;
+                    let px = cx + r, py = cy;
+                    for(let i=1; i<=segs; i++) {
+                        const theta = (i / segs) * Math.PI * 2;
+                        const nx = cx + r * Math.cos(theta);
+                        const ny = cy + r * Math.sin(theta);
+                        layerPoints[layerName].push(px, py, cz, nx, ny, cz);
+                        px = nx; py = ny;
+                    }
+                }
+                // ARC Render (Açısal Segmentasyon)
+                else if (entity.type === 'ARC' && entity.r > 0) {
+                    const cx = entity.cx||0, cy = entity.cy||0, cz = entity.cz||0, r = entity.r;
+                    let sDeg = entity.startAngle||0;
+                    let eDeg = entity.endAngle||0;
+                    if (eDeg < sDeg) eDeg += 360;
+                    
+                    const segs = 32;
+                    const sRad = sDeg * Math.PI / 180;
+                    const eRad = eDeg * Math.PI / 180;
+                    const step = (eRad - sRad) / segs;
+                    
+                    let px = cx + r * Math.cos(sRad);
+                    let py = cy + r * Math.sin(sRad);
+                    for(let i=1; i<=segs; i++) {
+                        const theta = sRad + (step * i);
+                        const nx = cx + r * Math.cos(theta);
+                        const ny = cy + r * Math.sin(theta);
+                        layerPoints[layerName].push(px, py, cz, nx, ny, cz);
+                        px = nx; py = ny;
+                    }
+                }
+                // TEXT / MTEXT Havuzu
+                else if ((entity.type === 'TEXT' || entity.type === 'MTEXT') && entity.text) {
+                    layerTexts[layerName].push(entity);
                 }
             });
 
-            if (points.length === 0) {
-                infoDiv.innerHTML = "<span style='color:yellow;'>Çizilebilir lineer obje bulunamadı (Katmanlar boş veya desteklenmiyor olabilir).</span>";
-                return;
+            // Sınırları hesaplamak (Auto-zoom) için global koordinat takibi
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+            // Tüm katmanları birleştirip listeyi oluşturma
+            const uniqueLayers = new Set([...Object.keys(cadData.layers), ...Object.keys(layerPoints), ...Object.keys(layerTexts)]);
+
+            uniqueLayers.forEach(layerName => {
+                const pts = layerPoints[layerName] || [];
+                const txts = layerTexts[layerName] || [];
+                
+                if (pts.length === 0 && txts.length === 0) return; // Boş katmanları listeleme
+
+                // Katman rengini belirle
+                let lColor = 0xffffff; 
+                if (cadData.layers[layerName] && cadData.layers[layerName].color !== undefined) {
+                    lColor = cadData.layers[layerName].color;
+                }
+
+                // Bu katman için bağımsız ThreeJS Grubu oluştur
+                const layerGroup = new THREE.Group();
+                globalLayerGroups[layerName] = layerGroup;
+                scene.add(layerGroup);
+
+                // 1. Çizgisel Geometrileri Gruba Ekle (Batch Render)
+                if (pts.length > 0) {
+                    const geometry = new THREE.BufferGeometry();
+                    geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+                    const material = new THREE.LineBasicMaterial({ color: lColor });
+                    const segments = new THREE.LineSegments(geometry, material);
+                    layerGroup.add(segments);
+
+                    // Sınır hesaplama döngüsü
+                    for (let k = 0; k < pts.length; k += 3) {
+                        const x = pts[k], y = pts[k+1];
+                        if(x < minX) minX = x; if(y < minY) minY = y;
+                        if(x > maxX) maxX = x; if(y > maxY) maxY = y;
+                    }
+                }
+
+                // 2. Yazıları Gruba Ekle
+                txts.forEach(t => {
+                    const txtSprite = createTextSprite(t.text, t.height, lColor);
+                    txtSprite.position.set(t.x||0, t.y||0, t.z||0);
+                    layerGroup.add(txtSprite);
+                    
+                    if(minX === Infinity) { // Eğer dosyada hiç çizgi yoksa yazıya göre odaklan
+                        if(t.x < minX) minX = t.x; if(t.y < minY) minY = t.y;
+                        if(t.x > maxX) maxX = t.x; if(t.y > maxY) maxY = t.y;
+                    }
+                });
+
+                // 3. UI Katman Paneline Ekleme
+                const row = document.createElement('div');
+                row.className = 'layer-row';
+                const hexStr = '#' + lColor.toString(16).padStart(6, '0');
+                
+                row.innerHTML = `
+                    <input type="checkbox" id="layer-chk-${layerName}" checked>
+                    <span class="layer-color-box" style="background-color: ${hexStr};"></span>
+                    <span class="layer-name" title="${layerName}">${layerName}</span>
+                `;
+
+                row.querySelector('input').addEventListener('change', (e) => {
+                    layerGroup.visible = e.target.checked;
+                });
+                layerListDiv.appendChild(row);
+            });
+
+            // --- 7. Zoom to Fit (Ekrana Sığdırma Hesaplaması) ---
+            if (minX !== Infinity) {
+                const cx = (minX + maxX) / 2;
+                const cy = (minY + maxY) / 2;
+                const sizeX = maxX - minX;
+                const sizeY = maxY - minY;
+                const maxDim = Math.max(sizeX, sizeY);
+                
+                controls.target.set(cx, cy, 0);
+                
+                const padding = 1.15;
+                camera.top = (maxDim / 2) * padding;
+                camera.bottom = (-maxDim / 2) * padding;
+                camera.left = ((-maxDim / 2) * aspect) * padding;
+                camera.right = ((maxDim / 2) * aspect) * padding;
+                
+                camera.position.set(cx, cy, 10000);
+                camera.updateProjectionMatrix();
+                controls.update();
+
+                document.getElementById('info').innerHTML = `<b>${fileName}</b> yüklendi. Aktif Katman: ${Object.keys(globalLayerGroups).length}`;
+            } else {
+                document.getElementById('info').innerHTML = "<span style='color:yellow;'>Çizim verisi bulunamadı.</span>";
             }
-
-            // Tek bir büyük buffer oluşturup GPU'ya itiyoruz
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
-            
-            const material = new THREE.LineBasicMaterial({ color: 0x00adb5 });
-            currentLineMesh = new THREE.LineSegments(geometry, material);
-            scene.add(currentLineMesh);
-
-            // --- 4. Otomatik Kamera Boyutlandırma (Zoom to Fit) ---
-            geometry.computeBoundingBox();
-            const box = geometry.boundingBox;
-            const center = new THREE.Vector3();
-            box.getCenter(center);
-            controls.target.copy(center);
-
-            const size = new THREE.Vector3();
-            box.getSize(size);
-            const maxDim = Math.max(size.x, size.y);
-            
-            const padding = 1.15;
-            camera.top = maxDim / 2 * padding;
-            camera.bottom = -maxDim / 2 * padding;
-            camera.left = (-maxDim / 2 * aspect) * padding;
-            camera.right = (maxDim / 2 * aspect) * padding;
-            
-            camera.position.set(center.x, center.y, 5000);
-            camera.updateProjectionMatrix();
-            controls.update();
-
-            infoDiv.innerHTML = `<b>${fileName}</b> yüklendi.<br>Çizgi Sayısı: ~${Math.floor(points.length / 6)}`;
         }
 
-        // --- 5. Render Loop ---
+        // --- 8. Sonsuz Çizim Döngüsü ---
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
@@ -253,13 +571,14 @@
         }
         animate();
 
+        // Pencere Boyutlandırma Adaptasyonu
         window.addEventListener('resize', () => {
-            const newAspect = window.innerWidth / window.innerHeight;
+            const newAspect = container.clientWidth / container.clientHeight;
             const height = camera.top - camera.bottom;
             camera.left = -height * newAspect / 2;
             camera.right = height * newAspect / 2;
             camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setSize(container.clientWidth, container.clientHeight);
         });
     </script>
 </body>
