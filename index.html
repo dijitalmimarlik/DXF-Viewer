@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<title>DXF Viewer Pro FIX</title>
+<title>DXF Viewer FIXED</title>
 
 <style>
 body{
@@ -16,29 +16,20 @@ body{
 
 #ui{
     position:absolute;
-    top:15px;
-    left:15px;
+    top:10px;
+    left:10px;
     z-index:10;
-    background:rgba(0,0,0,0.5);
-    padding:12px;
+    background:rgba(0,0,0,0.6);
+    padding:10px;
     border-radius:10px;
     color:white;
-    width:260px;
-    font-size:13px;
+    width:250px;
 }
 
-.layer-item{
-    display:flex;
-    margin-top:5px;
-}
-
-button{
+.layer-btn{
+    display:block;
     width:100%;
-    margin-top:6px;
-}
-
-#measure{
-    margin-top:8px;
+    margin-top:5px;
 }
 </style>
 </head>
@@ -47,13 +38,9 @@ button{
 
 <div id="ui">
 <input type="file" id="file" accept=".dxf">
-
-<button onclick="setTheme()">Tema</button>
-<button onclick="zoomExtents()">Zoom Extents</button>
-
+<button onclick="zoomExtents()">Zoom</button>
+<button onclick="toggleTheme()">Theme</button>
 <div id="layers"></div>
-
-<div id="measure">Ölçü: -</div>
 </div>
 
 <div id="viewer"></div>
@@ -65,9 +52,9 @@ button{
 <script>
 
 let scene,camera,renderer,controls;
-let dxfGroup = new THREE.Group();
-let layerMap = {};
-let dark=true;
+let group = new THREE.Group();
+let layers = {};
+let dark = true;
 
 init();
 
@@ -92,9 +79,13 @@ MIDDLE: THREE.MOUSE.PAN,
 RIGHT: THREE.MOUSE.DOLLY
 };
 
-scene.add(dxfGroup);
+scene.add(group);
 
-window.addEventListener("resize",onResize);
+window.addEventListener("resize",()=>{
+camera.aspect = innerWidth/innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(innerWidth,innerHeight);
+});
 
 animate();
 
@@ -104,12 +95,6 @@ function animate(){
 requestAnimationFrame(animate);
 controls.update();
 renderer.render(scene,camera);
-}
-
-function onResize(){
-camera.aspect = innerWidth/innerHeight;
-camera.updateProjectionMatrix();
-renderer.setSize(innerWidth,innerHeight);
 }
 
 document.getElementById("file").addEventListener("change",e=>{
@@ -125,21 +110,17 @@ try{
 
 clear();
 
-let parser=new DxfParser();
-let dxf=parser.parseSync(ev.target.result);
+const parser=new DxfParser();
+const dxf=parser.parseSync(ev.target.result);
 
-// 🔥 FIX: layer güvenli okuma
-let layers = extractLayers(dxf);
-
-for(let name of layers){
-getLayer(name);
-}
+console.log("DXF loaded:",dxf);
 
 dxf.entities.forEach(ent=>{
 draw(ent);
 });
 
-buildUI();
+buildLayers();
+
 zoomExtents();
 
 }catch(err){
@@ -149,77 +130,47 @@ alert(err.message);
 
 };
 
-reader.readAsText(file,"utf-8");
+reader.readAsText(file);
 
 });
 
-function extractLayers(dxf){
-
-// CASE 1
-if(dxf.tables?.layer?.layers &&
-Array.isArray(dxf.tables.layer.layers)){
-
-return dxf.tables.layer.layers.map(l=>l.name);
-}
-
-// CASE 2 (OBJECT)
-if(dxf.tables?.layer?.layers &&
-typeof dxf.tables.layer.layers === "object"){
-
-return Object.keys(dxf.tables.layer.layers);
-}
-
-// CASE 3 (fallback)
-return [...new Set(dxf.entities.map(e=>e.layer || "0"))];
-
-}
-
 function clear(){
-
-while(dxfGroup.children.length){
-dxfGroup.remove(dxfGroup.children[0]);
+while(group.children.length){
+group.remove(group.children[0]);
 }
-
-layerMap={};
+layers={};
 document.getElementById("layers").innerHTML="";
-
 }
 
 function getLayer(name){
-
-if(!layerMap[name]){
-
+if(!layers[name]){
 let g=new THREE.Group();
-layerMap[name]=g;
-dxfGroup.add(g);
-
+g.visible=true;
+layers[name]=g;
+group.add(g);
 }
-
-return layerMap[name];
-
+return layers[name];
 }
 
 function color(layer){
-
 let h=0;
 for(let i=0;i<layer.length;i++){
 h=layer.charCodeAt(i)+((h<<5)-h);
 }
 return new THREE.Color(h & 0xffffff);
-
 }
 
 function draw(e){
 
-let layer=getLayer(e.layer||"0");
+let layer = getLayer(e.layer || "0");
 
-let mat=new THREE.LineBasicMaterial({
-color:color(e.layer||"0")
+let mat = new THREE.LineBasicMaterial({
+color: color(e.layer || "0")
 });
 
 if(e.type==="LINE"){
 
-let geo=new THREE.BufferGeometry().setFromPoints([
+const geo=new THREE.BufferGeometry().setFromPoints([
 new THREE.Vector3(e.vertices[0].x,e.vertices[0].y,0),
 new THREE.Vector3(e.vertices[1].x,e.vertices[1].y,0)
 ]);
@@ -227,11 +178,9 @@ new THREE.Vector3(e.vertices[1].x,e.vertices[1].y,0)
 layer.add(new THREE.Line(geo,mat));
 }
 
-if(e.type==="LWPOLYLINE"||e.type==="POLYLINE"){
+if(e.type==="LWPOLYLINE"){
 
-let pts=e.vertices.map(v=>new THREE.Vector3(v.x,v.y,0));
-
-if(e.shape) pts.push(pts[0]);
+const pts=e.vertices.map(v=>new THREE.Vector3(v.x,v.y,0));
 
 layer.add(new THREE.Line(
 new THREE.BufferGeometry().setFromPoints(pts),
@@ -241,12 +190,13 @@ mat
 
 if(e.type==="CIRCLE"){
 
-let c=new THREE.EllipseCurve(
+let curve=new THREE.EllipseCurve(
 e.center.x,e.center.y,
-e.radius,e.radius,0,Math.PI*2
+e.radius,e.radius,
+0,Math.PI*2
 );
 
-let pts=c.getPoints(50);
+let pts=curve.getPoints(50);
 
 layer.add(new THREE.Line(
 new THREE.BufferGeometry().setFromPoints(
@@ -258,25 +208,24 @@ mat
 
 }
 
-function buildUI(){
+function buildLayers(){
 
 let ui=document.getElementById("layers");
 
-Object.keys(layerMap).forEach(name=>{
+Object.keys(layers).forEach(name=>{
 
-let d=document.createElement("div");
-d.className="layer-item";
+let btn=document.createElement("button");
+btn.className="layer-btn";
+btn.innerText=name;
 
-let b=document.createElement("button");
-b.innerText=name;
+btn.onclick=()=>{
 
-b.onclick=()=>{
-layerMap[name].visible=!layerMap[name].visible;
-b.style.opacity=layerMap[name].visible?1:0.3;
+layers[name].visible=!layers[name].visible;
+btn.style.opacity=layers[name].visible?1:0.3;
+
 };
 
-d.appendChild(b);
-ui.appendChild(d);
+ui.appendChild(btn);
 
 });
 
@@ -284,10 +233,10 @@ ui.appendChild(d);
 
 function zoomExtents(){
 
-let box=new THREE.Box3().setFromObject(dxfGroup);
+let box=new THREE.Box3().setFromObject(group);
 
-let size=box.getSize(new THREE.Vector3());
 let center=box.getCenter(new THREE.Vector3());
+let size=box.getSize(new THREE.Vector3());
 
 controls.target.copy(center);
 
@@ -299,17 +248,10 @@ camera.position.set(center.x,center.y,dist*1.2);
 
 }
 
-function setTheme(){
-
+function toggleTheme(){
 dark=!dark;
-
-scene.background=new THREE.Color(
-dark?0x111111:0x707070
-);
-
+scene.background=new THREE.Color(dark?0x111111:0x707070);
 }
-
-function animate(){}
 
 </script>
 
